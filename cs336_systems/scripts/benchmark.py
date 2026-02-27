@@ -29,14 +29,13 @@ def main(
     batch_size = train_conf["batch_size"]
     results_path = train_conf["results_path"]
 
-    hyperparameter_sweep = [("default", train_conf["transformer"])]
+    hyperparameter_sweep = train_conf["configs"]
 
     stats_df_ret = {}
 
-    for conf_name, transformer_conf in hyperparameter_sweep:
+    for conf_name, transformer_conf in hyperparameter_sweep.items():
         print(f"Benchmarking {conf_name=:}")
 
-        stats_df = {}
         d_model = transformer_conf["d_model"]
         num_heads = transformer_conf["num_heads"]
         context_length = transformer_conf["context_length"]
