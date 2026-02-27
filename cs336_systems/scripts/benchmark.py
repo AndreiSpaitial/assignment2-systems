@@ -20,7 +20,9 @@ def main(
     warmup_steps: int = 5,
     measurement_steps: int = 10,
     forward_only: bool = False,
+    device_str: str = "mps",
 ):
+    device = torch.device(device_str)
     with open(train_conf_path, "r") as f:
         train_conf = yaml.safe_load(f)
 
@@ -33,8 +35,9 @@ def main(
 
     stats_df_ret = {}
 
-    for conf_name, transformer_conf in hyperparameter_sweep.items():
+    for conf_name, model_conf in hyperparameter_sweep.items():
         print(f"Benchmarking {conf_name=:}")
+        transformer_conf = model_conf["transformer"]
 
         d_model = transformer_conf["d_model"]
         num_heads = transformer_conf["num_heads"]
@@ -42,7 +45,7 @@ def main(
         d_model = transformer_conf["d_model"]
         num_layers = transformer_conf["num_layers"]
         d_ff = transformer_conf["d_ff"]
-        rope_theta = train_conf["rope"]["theta"]
+        rope_theta = model_conf["rope"]["theta"]
         model = BasicsTransformerLM(
             vocab_size=vocab_size,
             context_length=context_length,
@@ -51,12 +54,12 @@ def main(
             num_heads=num_heads,
             d_ff=d_ff,
             rope_theta=rope_theta,
-        )
+        ).to(device)
 
-        for _ in range(warmup_steps):
-            x: Int64[Tensor, "b seq_len"] = torch.randint(vocab_size, (batch_size, context_length))
+        for _ in tqdm(range(warmup_steps), desc="Warming up"):
+            x: Int64[Tensor, "b seq_len"] = torch.randint(vocab_size, (batch_size, context_length), device=device)
             if not forward_only:
-                y = torch.randint(vocab_size, (batch_size, context_length))
+                y = torch.randint(vocab_size, (batch_size, context_length), device=device)
             y_pred: Float[Tensor, "b seq_len vocab_size"] = model(x)
 
             if not forward_only:
@@ -68,9 +71,9 @@ def main(
         forward_times = []
         backward_times = []
         for _ in tqdm(range(measurement_steps), desc="Benchmarking"):
-            x = torch.randint(vocab_size, (batch_size, context_length))
+            x = torch.randint(vocab_size, (batch_size, context_length), device=device)
             if not forward_only:
-                y = torch.randint(vocab_size, (batch_size, context_length))
+                y = torch.randint(vocab_size, (batch_size, context_length), device=device)
             start_time = timeit.default_timer()
             y_pred: Float[Tensor, "b seq_len vocab_size"] = model(x)
             torch.mps.synchronize()
