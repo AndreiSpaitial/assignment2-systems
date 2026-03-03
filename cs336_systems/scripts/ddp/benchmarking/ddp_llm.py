@@ -5,6 +5,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch import nn, Tensor
+from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler
 
 from jaxtyping import Float, Int64
 
@@ -34,6 +35,7 @@ def train_process(
     training_steps: int = 10,
     model_config: str = "small",
     device: str = "mps",
+    to_profile: bool = False,
 ):
     setup(rank, world_size)
     with open(train_conf_path, "r") as f:
@@ -81,6 +83,20 @@ def train_process(
     local_batch_size = batch_size // world_size
 
     times = []
+    my_schedule = schedule(wait=0, warmup=warmup_steps, active=5, repeat=1)
+    trace_handler = tensorboard_trace_handler(
+        dir_name="cs336_systems/scripts/ddp/benchmarking/results/profiling/",
+        worker_name=f"rank_{rank}"
+    )
+    if to_profile:
+        prof = profile(
+            activities=[ProfilerActivity.CPU],
+            schedule=my_schedule,
+            on_trace_ready=trace_handler,
+            record_shapes=True,
+            with_stack=True
+        )
+        prof.start()
     for i_step in tqdm(range(training_steps), desc="Training"):
         optimizer.zero_grad()
 
@@ -116,7 +132,11 @@ def train_process(
                 "step_time": (step_end_time-step_start_time),
                 "comms_time": (comms_end_time-comms_start_time),
             })
+        if to_profile:
+            prof.step()
 
+    if to_profile:
+        prof.stop()
     step_times_stats = pd.Series(
         [el["step_time"] for el in times]
     ).describe().to_dict()
@@ -143,6 +163,7 @@ def train_with_wrapper(
     training_steps: int = 10,
     model_config: str = "small",
     device: str = "mps",
+    to_profile: bool = False,
 ):
     setup(rank, world_size)
     with open(train_conf_path, "r") as f:
@@ -188,6 +209,20 @@ def train_with_wrapper(
     local_batch_size = batch_size // world_size
 
     times = []
+    my_schedule = schedule(wait=0, warmup=warmup_steps, active=5, repeat=1)
+    trace_handler = tensorboard_trace_handler(
+        dir_name="cs336_systems/scripts/ddp/benchmarking/results/profiling_wrapper/",
+        worker_name=f"rank_{rank}"
+    )
+    if to_profile:
+        prof = profile(
+            activities=[ProfilerActivity.CPU],
+            schedule=my_schedule,
+            on_trace_ready=trace_handler,
+            record_shapes=True,
+            with_stack=True
+        )
+        prof.start()
     for i_step in tqdm(range(training_steps), desc="Training"):
         optimizer.zero_grad()
 
@@ -214,6 +249,11 @@ def train_with_wrapper(
                 "step_time": (step_end_time-step_start_time),
                 "comms_time": (comms_end_time-comms_start_time),
             })
+        if to_profile:
+            prof.step()
+
+    if to_profile:
+        prof.stop()
 
     step_times_stats = pd.Series(
         [el["step_time"] for el in times]
@@ -241,6 +281,7 @@ def main(
     model_config: str = "small",
     use_ddp_wrapper: bool = False,
     device: str = "cpu",
+    profile: bool = False,
 ):
     assert train_conf_path, "Need to specify train conf path"
     if use_ddp_wrapper:
@@ -253,6 +294,7 @@ def main(
                 training_steps,
                 model_config,
                 device,
+                profile,
             ),
             nprocs=world_size,
             join=True
@@ -267,6 +309,7 @@ def main(
                 training_steps,
                 model_config,
                 device,
+                profile,
             ),
             nprocs=world_size,
             join=True

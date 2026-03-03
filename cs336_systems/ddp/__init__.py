@@ -1,1 +1,1 @@
-from .ddp import DDPModel
+from .ddp import DDPModel, BucketedDDPModel

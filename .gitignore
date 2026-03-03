@@ -166,3 +166,6 @@ cython_debug/
 
 cs336_systems/ddp/tests/data/*
 cs336_systems/ddp/tests/results/*
+
+cs336_systems/scripts/ddp/benchmarking/results/*
+**/.DS_Store
