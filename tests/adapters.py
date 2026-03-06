@@ -4,7 +4,7 @@ from typing import Type
 
 import torch
 
-from cs336_systems.ddp import DDPModel, ZeROOptimizer
+from cs336_systems.ddp import DDPModel, ZeROOptimizer, ZeRO1Optimizer, ZeRO2Optimizer
 
 
 def get_flashattention_autograd_function_pytorch() -> Type:
@@ -121,7 +121,7 @@ def ddp_bucketed_on_train_batch_start(ddp_model: torch.nn.Module, optimizer: tor
     raise NotImplementedError
 
 
-def get_sharded_optimizer(params, optimizer_cls: Type[torch.optim.Optimizer], **kwargs) -> torch.optim.Optimizer:
+def get_sharded_optimizer(params, zero_stage: int, optimizer_cls: Type[torch.optim.Optimizer], **kwargs) -> torch.optim.Optimizer:
     """
     Returns a torch.optim.Optimizer that handles optimizer state sharding
     of the given optimizer_cls on the provided parameters.
@@ -137,4 +137,9 @@ def get_sharded_optimizer(params, optimizer_cls: Type[torch.optim.Optimizer], **
     Returns:
         Instance of sharded optimizer.
     """
-    return ZeROOptimizer(params, optimizer_cls, **kwargs)
+    if zero_stage == 0:
+        return ZeROOptimizer(params, optimizer_cls, **kwargs)
+    if zero_stage == 1:
+        return ZeRO1Optimizer(params, optimizer_cls, **kwargs)
+    if zero_stage == 2:
+        return ZeRO2Optimizer(params, optimizer_cls, **kwargs)
