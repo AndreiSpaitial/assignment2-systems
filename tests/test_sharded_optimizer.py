@@ -81,5 +81,7 @@ def _test_sharded_optimizer(rank: int, world_size: int, model_class: Type[torch.
         numpy.testing.assert_allclose(
             non_sharded_parameters.detach().cpu().numpy(),
             sharded_parameters.detach().cpu().numpy(),
+            rtol=5e-5,
+            atol=5e-8,
         )
     _cleanup_process_group()

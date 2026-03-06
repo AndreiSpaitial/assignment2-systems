@@ -58,7 +58,6 @@ class AdamW(torch.optim.Optimizer):
 
                 # Can either apply weight decay here, or at the very end
                 # p.data.mul_(1 - group['lr'] * group['weight_decay'])
-
                 grad = p.grad.data
                 if grad.is_sparse:
                     raise RuntimeError("Adam does not support sparse gradients")
