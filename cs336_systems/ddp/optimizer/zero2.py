@@ -39,15 +39,17 @@ class ZeRO2Optimizer(torch.optim.Optimizer):
                 if p.requires_grad:
                     p.register_post_accumulate_grad_hook(hook)
 
+        self.optimizers = {}
         # Copy the original parameter groups to be able to pass them to child optimizer
-        shard_param_groups = [{**pg} for pg in self.param_groups]
-        for group in shard_param_groups:
+        for group in self.param_groups:
             # For the child optimizer, shard_params is params
             # Doing the parent and child optimizer to share memory so zero_grad just works for both
-            params = group.pop("shard_params")
-            group["params"] = params
+            for i, param in enumerate(group["shard_params"]):
+                shard_pg = {**group}
+                shard_pg.pop("shard_params")
+                shard_pg["params"] = [param]
 
-        self.optimizer = optimizer_cls(shard_param_groups, **kwargs)
+                self.optimizers[group["params"][i]] = optimizer_cls([shard_pg], **kwargs)
 
     def step(self, closure: Callable | None = None, **kwargs):
         world_size = dist.get_world_size()
@@ -66,16 +68,10 @@ class ZeRO2Optimizer(torch.optim.Optimizer):
                 # print(f"{dest_shard.shape=:}, indices: {start, end}, slice: {dest_shard[start:end].shape=:}")
                 group["shard_params"][i].grad = dest_shard[start:end]
 
-        self.handles.clear()
+                # After gradients are reduce-scattered, the child optimizer
+                # has them aggregated across ranks. We can now simply call .step()
+                self.optimizers[p].step(closure, **kwargs)
 
-        # After gradients are reduce-scattered, the child optimizer
-        # has them aggregated across ranks. We can now simply call .step()
-        self.optimizer.step(closure, **kwargs)
-
-        for group in self.param_groups:
-            for i, p in enumerate(group["params"]):
-                if not p.requires_grad:
-                    continue
                 # src now has updated parameters for its shard,
                 # for the complete batch
                 # We need to all_gather this to share across ranks
@@ -91,10 +87,15 @@ class ZeRO2Optimizer(torch.optim.Optimizer):
                 buffer_size = world_size * shard_size
                 buffer_shape = [buffer_size] + list(p.shape[1:])
                 buffer = torch.empty(buffer_shape)
-                buffer[:n] = p.data
 
-                dist.all_gather_into_tensor(buffer, src_buffer, async_op=False)
-                p.data = buffer[:n]
+                handle = dist.all_gather_into_tensor(buffer, src_buffer, async_op=True)
+
+                self.handles[p] = (handle, buffer)
+
+        for p, (handle, buffer) in self.handles.items():
+            n = p.shape[0]
+            handle.wait()
+            p.data = buffer[:n]
 
     def add_param_group(self, param_group: dict[str, Any]):
         shard_params = []
