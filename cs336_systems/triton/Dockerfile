@@ -15,3 +15,7 @@ RUN uv add triton && \
 
 # Final sync to install the project
 RUN uv sync --frozen --no-cache
+
+ENV TRITON_INTERPRET=1
+
+CMD uv run cs336_systems/triton/weighted_sum.py
