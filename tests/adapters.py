@@ -5,6 +5,7 @@ from typing import Type
 import torch
 
 from cs336_systems.ddp import DDPModel, ZeROOptimizer, ZeRO1Optimizer, ZeRO2Optimizer
+from cs336_systems.triton import TritonAttention
 
 
 def get_flashattention_autograd_function_pytorch() -> Type:
@@ -17,7 +18,7 @@ def get_flashattention_autograd_function_pytorch() -> Type:
         A class object (not an instance of the class)
     """
     # For example: return MyFlashAttnAutogradFunctionClass
-    raise NotImplementedError
+    return TritonAttention
 
 
 def get_flashattention_autograd_function_triton() -> Type:
