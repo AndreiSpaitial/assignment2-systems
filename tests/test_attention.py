@@ -61,13 +61,9 @@ def test_flash_forward_pass_pytorch():
     _test_flash_forward_pass(get_flashattention_autograd_function_pytorch().apply)
 
 
-@pytest.mark.skipif(
-    not torch.cuda.is_available(),
-    reason="A GPU must be available to run Triton kernels",
-)
 @pytest.mark.parametrize("is_causal", [False, True])
 def test_flash_forward_pass_triton(is_causal):
-    _test_flash_forward_pass(get_flashattention_autograd_function_triton().apply, device="cuda", is_causal=is_causal)
+    _test_flash_forward_pass(get_flashattention_autograd_function_triton().apply, is_causal=is_causal)
 
 
 
@@ -88,13 +84,9 @@ def test_flash_backward_pytorch():
     torch.testing.assert_close(dv_expected, v.grad, rtol=1e-2, atol=1e-2)
 
 
-@pytest.mark.skipif(
-    not torch.cuda.is_available(),
-    reason="A GPU must be available to run Triton kernels",
-)
 @pytest.mark.parametrize("is_causal", [False, True])
 def test_flash_backward_triton(is_causal):
-    dq_expected, dk_expected, dv_expected = flash_backward_results(lambda *args: _attention_and_lse(*args)[0], is_causal, device='cuda')
+    dq_expected, dk_expected, dv_expected = flash_backward_results(lambda *args: _attention_and_lse(*args)[0], is_causal)
 
     q, k, v, do = _make_attn_inputs(device='cuda')
     get_flashattention_autograd_function_triton().apply(q, k, v, is_causal).backward(do)

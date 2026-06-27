@@ -13,7 +13,7 @@ import triton.language as tl
 
 from torch import Tensor
 
-from einops import einsum, rearrange, reduce
+from einops import einsum, rearrange, reduce, repeat
 from jaxtyping import Float, Int
 
 from cs336_basics.nn_utils import softmax
@@ -233,25 +233,76 @@ class TritonAttention(torch.autograd.Function):
 
         return o
 
+    @torch.compile
     @staticmethod
     def backward(ctx, *grad_outputs):
-        raise NotImplementedError()
-    
+        dO = grad_outputs[0]
+
+        Q, K, V, L = ctx.saved_tensors
+
+        B, H, q_seq_len, D = Q.shape
+        k_seq_len = K.shape[-2]
+
+        T_Q = 16
+        T_K = 32
+        scale = 1./math.sqrt(D)
+
+        dQ = torch.zeros_like(Q)
+        dK = torch.zeros_like(K)
+        dV = torch.zeros_like(V)
+
+        for t_k in range(0, k_seq_len, T_K):
+            for t_q in range(0, q_seq_len, T_Q):
+                S_qk: Float[Tensor, "B ... T_Q T_K"] = scale * einsum(
+                    Q[..., t_q:(t_q + T_Q), :],
+                    K[..., t_k:(t_k + T_K), :],
+                    "B ... T_Q D, B ... T_K D -> B ... T_Q T_K"
+                )
+
+                L_i = repeat(L[..., t_q:(t_q + T_Q)], "B ... q_seq_len -> B ... q_seq_len T_K", T_K=T_K)
+                print(f"{S_qk.shape=:}")
+                print(f"{L_i.shape=:}")
+
+                P_qk: Float[Tensor, "B ... T_Q T_K"] = torch.exp(
+                    S_qk - L_i
+                )
+                print(f"{P_qk.shape=:}")
+
+                dO_q: Float[Tensor, "B ... T_Q D"] = dO[..., t_q:(t_q + T_Q), :]
+
+                print(f"{dO_q.shape=:}")
+
+                dV[..., t_k:(t_k + T_K), :] += einsum(
+                    P_qk, dO_q,
+                    "B ... T_Q T_K, B ... T_Q D -> B ... T_K D"
+                )
+
+        return dQ, dK, dV
+
 
 def main():
     f_simple_attention = TritonAttention.apply
 
-    Q = torch.randn((1, 4, 128, 32))
-    K = torch.randn((1, 4, 256, 32))
-    V = torch.randn((1, 4, 256, 32))
+    Q = torch.randn((1, 4, 128, 32), requires_grad=True)
+    K = torch.randn((1, 4, 256, 32), requires_grad=True)
+    V = torch.randn((1, 4, 256, 32), requires_grad=True)
 
     Q_triton = Q.clone().detach().requires_grad_(True)
     K_triton = K.clone().detach().requires_grad_(True)
     V_triton = V.clone().detach().requires_grad_(True)
 
-    O, L = sdpa_simple(Q, K, V)
+    y = torch.randn((1, 4, 128, 32))
 
-    O_triton, L_triton = f_simple_attention(Q_triton, K_triton, V_triton)
+    O, L = sdpa_simple(Q, K, V)
+    loss = F.mse_loss(O, y)
+
+    O_triton = f_simple_attention(Q_triton, K_triton, V_triton)
+    loss_triton = F.mse_loss(O_triton, y)
+
+    L_triton = O_triton.grad_fn.saved_tensors[-1]
+
+    loss.backward()
+    loss_triton.backward()
 
     # print(f"{O.shape=:}")
     # print(f"{L.shape=:}")
@@ -264,25 +315,38 @@ def main():
         rtol=1e-3,
         atol=1e-3,
     )
-
     numpy.testing.assert_allclose(
         L.detach().numpy(),
         L_triton.detach().numpy(),
         rtol=1e-3,
         atol=1e-3,
     )
+    numpy.testing.assert_allclose(
+        V.grad.detach().numpy(),
+        V_triton.grad.detach().numpy(),
+        rtol=1e-5,
+        atol=1e-5,
+    )
 
-    Q = torch.randn((1, 128, 32))
-    K = torch.randn((1, 256, 32))
-    V = torch.randn((1, 256, 32))
+    Q = torch.randn((1, 128, 32), requires_grad=True)
+    K = torch.randn((1, 256, 32), requires_grad=True)
+    V = torch.randn((1, 256, 32), requires_grad=True)
 
     Q_triton = Q.clone().detach().requires_grad_(True)
     K_triton = K.clone().detach().requires_grad_(True)
     V_triton = V.clone().detach().requires_grad_(True)
+    y = torch.randn((1, 128, 32))
 
     O, L = sdpa_simple(Q, K, V)
+    loss = F.mse_loss(O, y)
 
-    O_triton, L_triton = f_simple_attention(Q_triton, K_triton, V_triton)
+    O_triton = f_simple_attention(Q_triton, K_triton, V_triton)
+    loss_triton = F.mse_loss(O_triton, y)
+
+    L_triton = O_triton.grad_fn.saved_tensors[-1]
+
+    loss.backward()
+    loss_triton.backward()
 
     # print(O.shape)
     # print(O_triton.shape)
@@ -293,12 +357,17 @@ def main():
         rtol=1e-3,
         atol=1e-3,
     )
-
     numpy.testing.assert_allclose(
         L.detach().numpy(),
         L_triton.detach().numpy(),
         rtol=1e-3,
         atol=1e-3,
+    )
+    numpy.testing.assert_allclose(
+        V.grad.detach().numpy(),
+        V_triton.grad.detach().numpy(),
+        rtol=1e-5,
+        atol=1e-5,
     )
 
     print("all good")
