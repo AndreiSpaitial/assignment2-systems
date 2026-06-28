@@ -70,6 +70,7 @@ def simle_attention_fwd(
     L_stride_b, L_stride_head, L_stride_seq,
     ROWS_Q, ROWS_K, D: tl.constexpr,
     T_Q: tl.constexpr, T_K: tl.constexpr,
+    is_causal: tl.constexpr,
 ):
     row_tile_idx = tl.program_id(0)
     batch_index = tl.program_id(1)
@@ -126,6 +127,13 @@ def simle_attention_fwd(
     l = tl.zeros((T_Q, 1), dtype=tl.float32)
     m = tl.zeros((T_Q, 1), dtype=tl.float32) + float("-inf")
 
+    indices_T_K = tl.zeros((T_Q, T_K), dtype=tl.float16) + 1
+    indices_T_K = tl.cumsum(indices_T_K, axis=1) - 1
+
+    indices_T_Q = tl.zeros((T_Q, T_K), dtype=tl.float16) + 1
+    indices_T_Q = tl.cumsum(indices_T_Q, axis=0) - 1
+    indices_T_Q += row_tile_idx * T_Q
+
     for i in range(tl.cdiv(ROWS_K, T_K)):
         k = tl.load(k_block_ptr, boundary_check=(0, 1), padding_option="zero")
         v = tl.load(v_block_ptr, boundary_check=(0, 1), padding_option="zero")
@@ -144,6 +152,8 @@ def simle_attention_fwd(
 
         q_kt = tl.dot(q, tl.trans(k))
         q_kt /= scale
+        if is_causal:
+            q_kt = tl.where(indices_T_K > indices_T_Q, -1e6, q_kt)
 
         rm = tl.max(q_kt, axis=1, keep_dims=True)
         m_new = tl.maximum(m, rm)
@@ -170,6 +180,8 @@ def simle_attention_fwd(
 
         k_block_ptr = k_block_ptr.advance((T_K, 0))
         v_block_ptr = v_block_ptr.advance((T_K, 0))
+
+        indices_T_K += T_K
     
 
     # print(l)
@@ -207,6 +219,7 @@ class TritonAttention(torch.autograd.Function):
         ctx.T_Q = 16
         ctx.T_K = 16
         ctx.D = D
+        ctx.is_causal = is_causal
 
         o = torch.empty_like(Q)
         l = torch.empty((B, H, q_seq_len))
@@ -222,25 +235,30 @@ class TritonAttention(torch.autograd.Function):
             K.stride(0), K.stride(1), K.stride(2), K.stride(3),
             l.stride(0), l.stride(1), l.stride(2),
             q_seq_len, k_seq_len, ctx.D,
-            T_Q=ctx.T_Q, T_K=ctx.T_K
+            T_Q=ctx.T_Q, T_K=ctx.T_K,
+            is_causal=ctx.is_causal
         )
 
         if fake_heads:
-           o = rearrange(o, "B 1 N D -> B N D")
-           l = rearrange(l, "B 1 N -> B N")
+            o = rearrange(o, "B 1 N D -> B N D")
+            l = rearrange(l, "B 1 N -> B N")
+            
+            Q = rearrange(Q, "B 1 N D -> B N D")
+            K = rearrange(K, "B 1 M D -> B M D")
+            V = rearrange(V, "B 1 M D -> B M D")
 
-        ctx.save_for_backward(Q, K, V, l)
+        ctx.save_for_backward(Q, K, V, o, l)
 
         return o
 
-    @torch.compile
     @staticmethod
     def backward(ctx, *grad_outputs):
         dO = grad_outputs[0]
 
-        Q, K, V, L = ctx.saved_tensors
+        Q, K, V, O, L = ctx.saved_tensors
+        is_causal = ctx.is_causal
 
-        B, H, q_seq_len, D = Q.shape
+        q_seq_len, D = Q.shape[-2:]
         k_seq_len = K.shape[-2]
 
         T_Q = 16
@@ -259,25 +277,72 @@ class TritonAttention(torch.autograd.Function):
                     "B ... T_Q D, B ... T_K D -> B ... T_Q T_K"
                 )
 
+                indices_T_K: Float[Tensor, "B ... T_Q T_K"] = torch.ones_like(S_qk)
+                indices_T_K = torch.cumsum(indices_T_K, axis=-1) - 1 + t_k
+                indices_T_Q: Float[Tensor, "B ... T_Q T_K"] = torch.ones_like(S_qk)
+                indices_T_Q = torch.cumsum(indices_T_Q, axis=-2) - 1 + t_q
+
+                if is_causal:
+                    S_qk[indices_T_K > indices_T_Q] = -1e6
+
                 L_i = repeat(L[..., t_q:(t_q + T_Q)], "B ... q_seq_len -> B ... q_seq_len T_K", T_K=T_K)
-                print(f"{S_qk.shape=:}")
-                print(f"{L_i.shape=:}")
+                # print(f"{S_qk.shape=:}")
+                # print(f"{L_i.shape=:}")
 
                 P_qk: Float[Tensor, "B ... T_Q T_K"] = torch.exp(
                     S_qk - L_i
                 )
-                print(f"{P_qk.shape=:}")
+                # print(f"{P_qk.shape=:}")
 
                 dO_q: Float[Tensor, "B ... T_Q D"] = dO[..., t_q:(t_q + T_Q), :]
+                O_q : Float[Tensor, "B ... T_Q D"] =  O[..., t_q:(t_q + T_Q), :]
 
-                print(f"{dO_q.shape=:}")
+                dP_qk = einsum(
+                    dO_q, V[..., t_k:(t_k + T_K), :],
+                    "B ... T_Q D, B ... T_K D" 
+                    "-> B ... T_Q T_K"   
+                )
+
+                # print(f"{dP_qk.shape=:}")
+                # print(f"{dO_q.shape=:}")
+                # print(f"{O_q.shape=:}")
+
+                D_q = reduce(
+                    dO_q * O_q,
+                    "B ... T_Q D -> B ... T_Q",
+                    "sum"
+                )
+                D_q = repeat(
+                    D_q,
+                    "B ... T_Q -> B ... T_Q T_K",
+                    T_K=T_K,
+                )
+                # print(f"{D_q.shape=:}")
+
+                dS_qk = -P_qk * D_q + P_qk * dP_qk
+
+                # print(f"{S_qk.shape=:}")
 
                 dV[..., t_k:(t_k + T_K), :] += einsum(
                     P_qk, dO_q,
                     "B ... T_Q T_K, B ... T_Q D -> B ... T_K D"
                 )
 
-        return dQ, dK, dV
+                dK[..., t_k:(t_k + T_K), :] += scale * einsum(
+                    dS_qk, Q[..., t_q:(t_q + T_Q), :],
+                    "B ... T_Q T_K, B ... T_Q D"
+                    "-> B ... T_K D"
+                )
+                dQ[..., t_q:(t_q + T_Q), :] += scale * einsum(
+                    dS_qk, K[..., t_k:(t_k + T_K), :],
+                    "B ... T_Q T_K,"
+                    "B ... T_K D"
+                    "-> B ... T_Q D"
+                )
+
+                # print("----------")
+
+        return dQ, dK, dV, None
 
 
 def main():
@@ -327,6 +392,18 @@ def main():
         rtol=1e-5,
         atol=1e-5,
     )
+    numpy.testing.assert_allclose(
+        K.grad.detach().numpy(),
+        K_triton.grad.detach().numpy(),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    numpy.testing.assert_allclose(
+        Q.grad.detach().numpy(),
+        Q_triton.grad.detach().numpy(),
+        rtol=1e-5,
+        atol=1e-5,
+    )
 
     Q = torch.randn((1, 128, 32), requires_grad=True)
     K = torch.randn((1, 256, 32), requires_grad=True)
@@ -366,6 +443,18 @@ def main():
     numpy.testing.assert_allclose(
         V.grad.detach().numpy(),
         V_triton.grad.detach().numpy(),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    numpy.testing.assert_allclose(
+        K.grad.detach().numpy(),
+        K_triton.grad.detach().numpy(),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    numpy.testing.assert_allclose(
+        Q.grad.detach().numpy(),
+        Q_triton.grad.detach().numpy(),
         rtol=1e-5,
         atol=1e-5,
     )

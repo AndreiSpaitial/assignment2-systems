@@ -88,7 +88,7 @@ def test_flash_backward_pytorch():
 def test_flash_backward_triton(is_causal):
     dq_expected, dk_expected, dv_expected = flash_backward_results(lambda *args: _attention_and_lse(*args)[0], is_causal)
 
-    q, k, v, do = _make_attn_inputs(device='cuda')
+    q, k, v, do = _make_attn_inputs()
     get_flashattention_autograd_function_triton().apply(q, k, v, is_causal).backward(do)
 
     torch.testing.assert_close(dq_expected, q.grad, rtol=1e-2, atol=1e-2)
