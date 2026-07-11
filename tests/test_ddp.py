@@ -76,6 +76,7 @@ def _test_DistributedDataParallelCPU(
         # Use an artificially small bucket size so we can get our toy model split
         # into multiple buckets.
         bucket_size_mb=bucket_size_mb,
+        world_size=world_size,
     )
 
     # If we're on rank 0, the DDP model should still exactly match the parameters of the

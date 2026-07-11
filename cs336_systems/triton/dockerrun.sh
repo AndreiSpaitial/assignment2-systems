@@ -1,0 +1,1 @@
+docker run -v ./cs336_systems/triton/:/app/cs336_systems/triton/ triton uv run "$1"
