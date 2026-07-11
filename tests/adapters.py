@@ -4,7 +4,7 @@ from typing import Type
 
 import torch
 
-from cs336_systems.ddp import DDPModel, ZeROOptimizer, ZeRO1Optimizer, ZeRO2Optimizer
+from cs336_systems.ddp import BucketedDDPModel, DDPModel, ZeROOptimizer, ZeRO1Optimizer, ZeRO2Optimizer
 from cs336_systems.triton import TritonAttention
 
 
@@ -73,7 +73,7 @@ def ddp_individual_parameters_on_after_backward(ddp_model: torch.nn.Module, opti
     ddp_model.finish_gradient_synchronization()
 
 
-def get_ddp_bucketed(module: torch.nn.Module, bucket_size_mb: float) -> torch.nn.Module:
+def get_ddp_bucketed(module: torch.nn.Module, bucket_size_mb: float, world_size: int) -> torch.nn.Module:
     """
     Returns a torch.nn.Module container that handles
     parameter broadcasting and gradient synchronization for
@@ -91,7 +91,7 @@ def get_ddp_bucketed(module: torch.nn.Module, bucket_size_mb: float) -> torch.nn
     Returns:
         Instance of a DDP class.
     """
-    raise NotImplementedError
+    return BucketedDDPModel(module, bucket_size_mb, world_size)
 
 
 def ddp_bucketed_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Optimizer):
@@ -106,7 +106,7 @@ def ddp_bucketed_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.
             Optimizer being used with the DDP-wrapped model.
     """
     # For example: ddp_model.finish_gradient_synchronization()
-    raise NotImplementedError
+    return ddp_model.finish_gradient_synchronization()
 
 
 def ddp_bucketed_on_train_batch_start(ddp_model: torch.nn.Module, optimizer: torch.optim.Optimizer):
@@ -119,7 +119,7 @@ def ddp_bucketed_on_train_batch_start(ddp_model: torch.nn.Module, optimizer: tor
         optimizer: torch.optim.Optimizer
             Optimizer being used with the DDP-wrapped model.
     """
-    raise NotImplementedError
+    
 
 
 def get_sharded_optimizer(params, zero_stage: int, optimizer_cls: Type[torch.optim.Optimizer], **kwargs) -> torch.optim.Optimizer:
