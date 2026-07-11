@@ -8,6 +8,10 @@ import torch.distributed as dist
 
 
 class ZeROOptimizer(torch.optim.Optimizer):
+    """
+    Vanilla ddp optimizer, no comms overlap either.
+    Just for testing.
+    """
     def __init__(
         self,
         params,

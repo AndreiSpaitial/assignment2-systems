@@ -4,7 +4,7 @@ from typing import Type
 
 import torch
 
-from cs336_systems.ddp import BucketedDDPModel, DDPModel, ZeROOptimizer, ZeRO1Optimizer, ZeRO2Optimizer
+from cs336_systems.ddp import BucketedDDPModel, DDPModel, ZeROOptimizer, ZeRO1Optimizer, ZeRO2Optimizer, ZeRO3Optimizer
 from cs336_systems.triton import TritonAttention
 
 
@@ -144,3 +144,5 @@ def get_sharded_optimizer(params, zero_stage: int, optimizer_cls: Type[torch.opt
         return ZeRO1Optimizer(params, optimizer_cls, **kwargs)
     if zero_stage == 2:
         return ZeRO2Optimizer(params, optimizer_cls, **kwargs)
+    if zero_stage == 3:
+        return ZeRO3Optimizer(params, optimizer_cls, **kwargs)

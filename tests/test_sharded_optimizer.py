@@ -20,7 +20,7 @@ from cs336_basics.optimizer import AdamW
 
 
 @pytest.mark.parametrize("model_class", [ToyModel, ToyModelWithTiedWeights])
-@pytest.mark.parametrize("zero_stage", [0, 1, 2])
+@pytest.mark.parametrize("zero_stage", [0, 1, 2, 3])
 @pytest.mark.parametrize("world_size", [2, 6, 8])
 def test_sharded_optimizer(model_class, zero_stage, world_size):
     mp.spawn(
