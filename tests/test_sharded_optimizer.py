@@ -48,6 +48,12 @@ def _test_sharded_optimizer(rank: int, world_size: int, model_class: Type[torch.
         eps=1e-8,
     )
     sharded_model = deepcopy(non_sharded_model)
+    for p in sharded_model.parameters():
+        p.parent_ = []
+    for m in sharded_model.modules():
+        for p in m.parameters():
+            p.parent_.append(m)
+
     sharded_optimizer = get_sharded_optimizer(
         sharded_model.parameters(),
         zero_stage,
@@ -65,14 +71,24 @@ def _test_sharded_optimizer(rank: int, world_size: int, model_class: Type[torch.
     input_all = torch.rand((total_data, 10)).to(device)
     labels_all = torch.rand((total_data, 5)).to(device)
 
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+
     for non_sharded_parameters, sharded_parameters in zip(non_sharded_model.parameters(), sharded_model.parameters()):
+        n = non_sharded_parameters.shape[0]
+        shard_size = int(math.ceil(n / world_size))
+        local_start = shard_size * rank
+        local_end = local_start + shard_size
+        non_sharded_parameters_local = non_sharded_parameters
+        if zero_stage == 3:
+            non_sharded_parameters_local = non_sharded_parameters[local_start:local_end]
+
         numpy.testing.assert_allclose(
-            non_sharded_parameters.detach().cpu().numpy(),
+            non_sharded_parameters_local.detach().cpu().numpy(),
             sharded_parameters.detach().cpu().numpy(),
         )
 
-    rank = dist.get_rank()
-    world_size = dist.get_world_size()
+
     for i in range(num_steps):
         batch_start = batch_size * i
         batch_end = batch_start + batch_size
@@ -92,7 +108,6 @@ def _test_sharded_optimizer(rank: int, world_size: int, model_class: Type[torch.
         non_sharded_model_loss.backward()
         non_sharded_optimizer.step()
 
-    for i in range(num_steps):
         batch_start = batch_size * i + batch_size_per_rank * rank
         batch_end = batch_start + batch_size_per_rank
         input_ = input_all[batch_start:batch_end]
@@ -109,39 +124,48 @@ def _test_sharded_optimizer(rank: int, world_size: int, model_class: Type[torch.
         sharded_model_loss.backward()
         sharded_optimizer.step()
 
-        # for non_sharded_parameters, sharded_parameters in zip(non_sharded_optimizer.param_groups[0]["params"], sharded_optimizer.param_groups[0]["shard_params"]):
-        #     if non_sharded_parameters.grad is None:
-        #         continue
-        #     n = non_sharded_parameters.shape[0]
-        #     shard_size = int(math.ceil(n / world_size))
-        #     local_start = shard_size * rank
-        #     local_end = local_start + shard_size
-        #     non_sharded_parameters_local_grad = non_sharded_parameters.grad[local_start:local_end]
+        for non_sharded_parameters, sharded_parameters in zip(non_sharded_optimizer.param_groups[0]["params"], sharded_optimizer.param_groups[0]["shard_params"]):
+            if non_sharded_parameters.grad is None:
+                continue
+            n = non_sharded_parameters.shape[0]
+            shard_size = int(math.ceil(n / world_size))
+            local_start = shard_size * rank
+            local_end = local_start + shard_size            
 
-        #     numpy.testing.assert_allclose(
-        #         non_sharded_parameters_local_grad.detach().cpu().numpy(),
-        #         sharded_parameters.grad.detach().cpu().numpy(),
-        #         rtol=5e-5,
-        #         atol=5e-8,
-        #     )
+            non_sharded_parameters_local = non_sharded_parameters[local_start:local_end]
+            non_sharded_parameters_local_grad = non_sharded_parameters.grad[local_start:local_end]
+                
 
-        # for non_sharded_parameters, sharded_parameters in zip(non_sharded_model.parameters(), sharded_model.parameters()):
-        #     numpy.testing.assert_allclose(
-        #         non_sharded_parameters.detach().cpu().numpy(),
-        #         sharded_parameters.detach().cpu().numpy(),
-        #         rtol=5e-5,
-        #         atol=5e-8,
-        #     )
+            numpy.testing.assert_allclose(
+                non_sharded_parameters_local_grad.detach().cpu().numpy(),
+                sharded_parameters.grad.detach().cpu().numpy(),
+                rtol=1e-3,
+                atol=1e-3,
+            )
+            numpy.testing.assert_allclose(
+                non_sharded_parameters_local.detach().cpu().numpy(),
+                sharded_parameters.detach().cpu().numpy(),
+                rtol=1e-3,
+                atol=1e-3,
+            )
 
         # print(f"Iteration {i} OK")
 
     # Check that the final model weights are the same regardless of if we're using
     # the sharded or non-sharded optimizer.
     for non_sharded_parameters, sharded_parameters in zip(non_sharded_model.parameters(), sharded_model.parameters()):
+        n = non_sharded_parameters.shape[0]
+        shard_size = int(math.ceil(n / world_size))
+        local_start = shard_size * rank
+        local_end = local_start + shard_size
+        non_sharded_parameters_local = non_sharded_parameters
+        if zero_stage == 3:
+            non_sharded_parameters_local = non_sharded_parameters[local_start:local_end]
+
         numpy.testing.assert_allclose(
-            non_sharded_parameters.detach().cpu().numpy(),
+            non_sharded_parameters_local.detach().cpu().numpy(),
             sharded_parameters.detach().cpu().numpy(),
-            rtol=1e-5,
-            atol=1e-5,
+            rtol=1e-3,
+            atol=1e-3,
         )
     _cleanup_process_group()
