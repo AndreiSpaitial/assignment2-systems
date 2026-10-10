@@ -53,7 +53,7 @@ def get_ddp(module: torch.nn.Module) -> torch.nn.Module:
         Instance of a DDP class.
     """
     # For example: return DDPIndividualParameters(module)
-    return DDPModel(module, world_size)
+    return DDPModel(module)
 
 
 def ddp_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Optimizer):
@@ -119,7 +119,7 @@ def fsdp_gather_full_params(fsdp_model: torch.nn.Module) -> dict[str, torch.Tens
     
 
 
-def get_sharded_optimizer(params, optimizer_cls: type[torch.optim.Optimizer], **kwargs) -> torch.optim.Optimizer:
+def get_sharded_optimizer(params, optimizer_cls: type[torch.optim.Optimizer], zero_stage: int, **kwargs) -> torch.optim.Optimizer:
     """
     Returns a torch.optim.Optimizer that handles optimizer state sharding
     of the given optimizer_cls on the provided parameters.
@@ -135,11 +135,9 @@ def get_sharded_optimizer(params, optimizer_cls: type[torch.optim.Optimizer], **
     Returns:
         Instance of sharded optimizer.
     """
-    # if zero_stage == 0:
-    #     return ZeROOptimizer(params, optimizer_cls, **kwargs)
-    # if zero_stage == 1:
-    #     return ZeRO1Optimizer(params, optimizer_cls, **kwargs)
-    # if zero_stage == 2:
-    #     return ZeRO2Optimizer(params, optimizer_cls, **kwargs)
-    # if zero_stage == 3:
-    #     return ZeRO3Optimizer(params, optimizer_cls, **kwargs)
+    if zero_stage == 0:
+        return ZeROOptimizer(params, optimizer_cls, **kwargs)
+    if zero_stage == 1:
+        return ZeRO1Optimizer(params, optimizer_cls, **kwargs)
+    if zero_stage == 2:
+        return ZeRO2Optimizer(params, optimizer_cls, **kwargs)

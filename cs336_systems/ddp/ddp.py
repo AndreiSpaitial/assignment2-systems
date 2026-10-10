@@ -7,13 +7,12 @@ class DDPModel(nn.Module):
     def __init__(
             self,
             module: nn.Module,
-            world_size: int,
     ):
         super().__init__()
 
         self.module = module
         self.handles: list = []
-        self.world_size = world_size
+        self.world_size = dist.get_world_size()
 
         def hook(p: Tensor) -> None:
             handle = dist.all_reduce(

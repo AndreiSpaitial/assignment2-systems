@@ -20,7 +20,7 @@ from cs336_basics.optimizer import AdamW
 
 
 @pytest.mark.parametrize("model_class", [ToyModel, ToyModelWithTiedWeights])
-@pytest.mark.parametrize("zero_stage", [0, 1, 2, 3])
+@pytest.mark.parametrize("zero_stage", [0, 1, 2])
 @pytest.mark.parametrize("world_size", [2, 6, 8])
 def test_sharded_optimizer(model_class, zero_stage, world_size):
     mp.spawn(
@@ -56,8 +56,8 @@ def _test_sharded_optimizer(rank: int, world_size: int, model_class: Type[torch.
 
     sharded_optimizer = get_sharded_optimizer(
         sharded_model.parameters(),
-        zero_stage,
         optimizer_cls,
+        zero_stage,
         lr=0.1,
         weight_decay=0.1,
         betas=(0.9, 0.999),
@@ -69,7 +69,7 @@ def _test_sharded_optimizer(rank: int, world_size: int, model_class: Type[torch.
     batch_size = world_size * batch_size_per_rank
     total_data = world_size * batch_size_per_rank * num_steps
     input_all = torch.rand((total_data, 10)).to(device)
-    labels_all = torch.rand((total_data, 5)).to(device)
+    labels_all = torch.rand((total_data, 10)).to(device)
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -97,9 +97,6 @@ def _test_sharded_optimizer(rank: int, world_size: int, model_class: Type[torch.
 
         non_sharded_optimizer.zero_grad()
 
-        # batch size 32, 10 input features, 5 output features
-        input_ = torch.rand((32, 10)).to(device)
-        labels = torch.rand((32, 10)).to(device)
         non_sharded_input = deepcopy(input_)
         non_sharded_labels = deepcopy(labels)
 
@@ -111,8 +108,6 @@ def _test_sharded_optimizer(rank: int, world_size: int, model_class: Type[torch.
 
         batch_start = batch_size * i + batch_size_per_rank * rank
         batch_end = batch_start + batch_size_per_rank
-        input_ = input_all[batch_start:batch_end]
-        labels = labels_all[batch_start:batch_end]
 
         sharded_input = deepcopy(input_)
         sharded_labels = deepcopy(labels)

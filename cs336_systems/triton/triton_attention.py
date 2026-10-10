@@ -68,7 +68,7 @@ def simle_attention_fwd(
     Q_stride_b, Q_stride_head, Q_stride_seq, Q_stride_d,
     K_stride_b, K_stride_head, K_stride_seq, K_stride_d,
     L_stride_b, L_stride_head, L_stride_seq,
-    ROWS_Q, ROWS_K, D: tl.constexpr,
+    ROWS_Q: tl.constexpr, ROWS_K: tl.constexpr, D: tl.constexpr,
     T_Q: tl.constexpr, T_K: tl.constexpr,
     is_causal: tl.constexpr,
 ):
