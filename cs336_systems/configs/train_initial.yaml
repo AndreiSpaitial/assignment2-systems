@@ -1,0 +1,159 @@
+experiment_name: initial
+train_path: data/tokenized/tinystories_train.npy
+eval_path: data/tokenized/tinystories_valid.npy
+results_path: cs336_systems/scripts/benchmark_results/initial
+checkpoint_dir: cs336_basics/scripts/train/initial/checkpoints/
+checkpoint_every: 1000
+epochs: 1
+eval_every: 1500
+shuffle: True
+batch_size: 8
+max_steps: 10000
+
+
+configs:
+  small:
+    gradient_clipping:
+      M: 1
+
+    lr_conf:
+      lr_max: 1.0e-1
+      lr_min: 1.0e-2
+      t_W: 500
+      t_C: 10000
+
+    rope:
+      theta: 10000
+
+    transformer:
+      d_model: 768
+      num_heads: 12
+      context_length: 256
+      num_layers: 12
+      d_ff: 3072
+
+    tokenizer:
+      checkpoint_dir: cs336_basics/tokenizer/checkpoints/tinystories/
+      special_tokens: ["<|endoftext|>"]
+
+    optimizer:
+      lr: 1.0e-1
+      weight_decay: 1.0e-2
+      betas: [0.9, 0.999]
+  
+  medium:
+    gradient_clipping:
+      M: 1
+
+    lr_conf:
+      lr_max: 1.0e-1
+      lr_min: 1.0e-2
+      t_W: 500
+      t_C: 10000
+
+    rope:
+      theta: 10000
+
+    transformer:
+      d_model: 1024
+      num_heads: 16
+      context_length: 256
+      num_layers: 24
+      d_ff: 4096
+
+    tokenizer:
+      checkpoint_dir: cs336_basics/tokenizer/checkpoints/tinystories/
+      special_tokens: ["<|endoftext|>"]
+
+    optimizer:
+      lr: 1.0e-1
+      weight_decay: 1.0e-2
+      betas: [0.9, 0.999]
+
+  large:
+    gradient_clipping:
+      M: 1
+
+    lr_conf:
+      lr_max: 1.0e-1
+      lr_min: 1.0e-2
+      t_W: 500
+      t_C: 10000
+
+    rope:
+      theta: 10000
+
+    transformer:
+      d_model: 1280
+      num_heads: 20
+      context_length: 256
+      num_layers: 36
+      d_ff: 5120
+
+    tokenizer:
+      checkpoint_dir: cs336_basics/tokenizer/checkpoints/tinystories/
+      special_tokens: ["<|endoftext|>"]
+
+    optimizer:
+      lr: 1.0e-1
+      weight_decay: 1.0e-2
+      betas: [0.9, 0.999]
+
+# TODO: get more compute and try these 
+  # xl:
+  #   gradient_clipping:
+  #     M: 1
+
+  #   lr_conf:
+  #     lr_max: 1.0e-1
+  #     lr_min: 1.0e-2
+  #     t_W: 500
+  #     t_C: 10000
+
+  #   rope:
+  #     theta: 10000
+
+  #   transformer:
+  #     d_model: 1600
+  #     num_heads: 25
+  #     context_length: 256
+  #     num_layers: 48
+  #     d_ff: 6400
+
+  #   tokenizer:
+  #     checkpoint_dir: cs336_basics/tokenizer/checkpoints/tinystories/
+  #     special_tokens: ["<|endoftext|>"]
+
+  #   optimizer:
+  #     lr: 1.0e-1
+  #     weight_decay: 1.0e-2
+  #     betas: [0.9, 0.999]
+  
+  # 2.7B:
+  #   gradient_clipping:
+  #     M: 1
+
+  #   lr_conf:
+  #     lr_max: 1.0e-1
+  #     lr_min: 1.0e-2
+  #     t_W: 500
+  #     t_C: 10000
+
+  #   rope:
+  #     theta: 10000
+
+  #   transformer:
+  #     d_model: 2560
+  #     num_heads: 32
+  #     context_length: 256
+  #     num_layers: 32
+  #     d_ff: 10240
+
+  #   tokenizer:
+  #     checkpoint_dir: cs336_basics/tokenizer/checkpoints/tinystories/
+  #     special_tokens: ["<|endoftext|>"]
+
+  #   optimizer:
+  #     lr: 1.0e-1
+  #     weight_decay: 1.0e-2
+  #     betas: [0.9, 0.999]
