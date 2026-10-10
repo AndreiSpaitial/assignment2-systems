@@ -98,7 +98,8 @@ def _test_sharded_optimizer(rank: int, world_size: int, model_class: Type[torch.
         non_sharded_optimizer.zero_grad()
 
         # batch size 32, 10 input features, 5 output features
-
+        input_ = torch.rand((32, 10)).to(device)
+        labels = torch.rand((32, 10)).to(device)
         non_sharded_input = deepcopy(input_)
         non_sharded_labels = deepcopy(labels)
 

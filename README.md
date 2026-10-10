@@ -1,7 +1,7 @@
-# CS336 Spring 2025 Assignment 2: Systems
+# CS336 Spring 2026 Assignment 2: Systems
 
 For a full description of the assignment, see the assignment handout at
-[cs336_spring2025_assignment2_systems.pdf](./cs336_spring2025_assignment2_systems.pdf)
+[cs336_assignment2_systems.pdf](./cs336_assignment2_systems.pdf)
 
 If you see any issues with the assignment handout or code, please feel free to
 raise a GitHub issue or open a pull request with a fix.
@@ -44,15 +44,15 @@ package is accessible by running:
 
 ```sh
 $ uv run python
-Using CPython 3.12.10
+Using CPython 3.13.13
 Creating virtual environment at: /path/to/uv/env/dir
       Built cs336-systems @ file:///path/to/systems/dir
       Built cs336-basics @ file:///path/to/basics/dir
-Installed 85 packages in 711ms
-Python 3.12.10 (main, Apr  9 2025, 04:03:51) [Clang 20.1.0 ] on linux
-...
+Installed 78 packages in 168ms
+Python 3.13.13 (main, Apr  7 2026, 20:49:46) [Clang 22.1.1 ] on linux
+Type "help", "copyright", "credits" or "license" for more information.
 >>> import cs336_basics
->>> 
+...
 ```
 
 `uv run` installs dependencies automatically as dictated in the `pyproject.toml` file.

@@ -1,6 +1,5 @@
 import logging
 from copy import deepcopy
-from typing import Type
 
 import pytest
 import torch
@@ -10,9 +9,8 @@ import torch.nn as nn
 import torch.optim as optim
 
 from .adapters import (
-    ddp_bucketed_on_after_backward,
-    ddp_bucketed_on_train_batch_start,
-    get_ddp_bucketed,
+    ddp_on_after_backward,
+    get_ddp,
 )
 from .common import (
     FIXTURES_PATH,
@@ -27,33 +25,17 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.mark.parametrize("model_class", [ToyModel, ToyModelWithTiedWeights])
-@pytest.mark.parametrize("bucket_size_mb", [0.0016, 0.0001, 0.01])
-def test_DistributedDataParallelCPU(bucket_size_mb, model_class):
-    """
-    bucket_size_mb 0.0016 is designed to test the case with 2 buckets (one bucket
-    has 2 parameter tensors, the other has 2).
-
-    bucket_size_mb 0.0001 is designed to test the case with 3 buckets (each bucket
-    has one parameter tensors).
-
-    bucket_size_mb 0.01 is designed to test the case with 1 buckets (containing
-    3 parameter tensors).
-    """
+def test_DistributedDataParallel(model_class):
     world_size = 2
     mp.spawn(
-        _test_DistributedDataParallelCPU,
-        args=(world_size, bucket_size_mb, model_class),
+        _test_DistributedDataParallel,
+        args=(world_size, model_class),
         nprocs=world_size,
         join=True,
     )
 
 
-def _test_DistributedDataParallelCPU(
-    rank: int,
-    world_size: int,
-    bucket_size_mb: float,
-    model_class: Type[torch.nn.Module],
-):
+def _test_DistributedDataParallel(rank: int, world_size: int, model_class: type[torch.nn.Module]):
     # Use gloo backend for CPU
     device = _setup_process_group(rank=rank, world_size=world_size, backend="gloo")
     # Execute barrier prior to running test to ensure that every process
@@ -71,13 +53,7 @@ def _test_DistributedDataParallelCPU(
     # Create a DDP model. Note that the weights of this model should
     # match the non-parallel baseline above.
     ddp_base = deepcopy(non_parallel_model)
-    ddp_model = get_ddp_bucketed(
-        ddp_base,
-        # Use an artificially small bucket size so we can get our toy model split
-        # into multiple buckets.
-        bucket_size_mb=bucket_size_mb,
-        world_size=world_size,
-    )
+    ddp_model = get_ddp(ddp_base)
 
     # If we're on rank 0, the DDP model should still exactly match the parameters of the
     # non-parallel baseline (since the parameters on rank 0 weren't changed).
@@ -89,9 +65,7 @@ def _test_DistributedDataParallelCPU(
         ddp_model_parameter,
     ) in zip(non_parallel_model.named_parameters(), ddp_model.named_parameters()):
         # This parameter was initialized as [2, 2], so we expect its value to remain the same
-        is_no_grad_fixed_param = (
-            "no_grad_fixed_param" in ddp_model_param_name or "no_grad_fixed_param" in non_parallel_param_name
-        )
+        is_no_grad_fixed_param = "no_grad_fixed_param" in ddp_model_param_name or "no_grad_fixed_param" in non_parallel_param_name
         if rank == 0 or is_no_grad_fixed_param:
             assert torch.allclose(non_parallel_model_parameter, ddp_model_parameter)
         else:
@@ -104,12 +78,13 @@ def _test_DistributedDataParallelCPU(
     # overall pool of data.
     # Shape: (20, 10)
     all_x = torch.load(FIXTURES_PATH / "ddp_test_data.pt")
-    # Shape: (20, 5)
+    # Shape: (20, 10)
     all_y = torch.load(FIXTURES_PATH / "ddp_test_labels.pt")
 
     # Each rank will see only 10 examples (out of the total dataset size of 20)
     assert all_x.size(0) % world_size == 0
     local_bs = int(all_y.size(0) / world_size)
+
     loss_fn = nn.MSELoss()
 
     # Optimizer for the DDP model
@@ -118,7 +93,6 @@ def _test_DistributedDataParallelCPU(
     non_parallel_optimizer = optim.SGD(non_parallel_model.parameters(), lr=0.1)
 
     for i in range(5):
-        ddp_bucketed_on_train_batch_start(ddp_model=ddp_model, optimizer=ddp_optimizer)
         ddp_optimizer.zero_grad()
         non_parallel_optimizer.zero_grad()
 
@@ -134,9 +108,7 @@ def _test_DistributedDataParallelCPU(
         # from the parameters of the DDP model (since we've applied the
         # gradient step to the non-parallel model, but not to the DDP model).
         if rank == 0:
-            for non_parallel_model_parameter, ddp_model_parameter in zip(
-                non_parallel_model.parameters(), ddp_model.parameters()
-            ):
+            for non_parallel_model_parameter, ddp_model_parameter in zip(non_parallel_model.parameters(), ddp_model.parameters()):
                 if non_parallel_model_parameter.requires_grad and ddp_model_parameter.requires_grad:
                     # The only parameters that change are those that require_grad
                     assert not torch.allclose(non_parallel_model_parameter, ddp_model_parameter)
@@ -154,15 +126,15 @@ def _test_DistributedDataParallelCPU(
         ddp_loss = loss_fn(ddp_outputs, ddp_labels)
         ddp_loss.backward()
 
-        # Wait for all DDP ranks to sync gradients
-        ddp_bucketed_on_after_backward(ddp_model=ddp_model, optimizer=ddp_optimizer)
+        # Run student-written code that needs to execute after the backward pass,
+        # but before the optimizer step (e.g., to wait for all DDP ranks to sync gradients)
+        ddp_on_after_backward(ddp_model, ddp_optimizer)
+
         ddp_optimizer.step()
 
         # At this point, the non-parallel model should exactly match the parameters of the DDP model
         if rank == 0:
-            for non_parallel_model_parameter, ddp_model_parameter in zip(
-                non_parallel_model.parameters(), ddp_model.parameters()
-            ):
+            for non_parallel_model_parameter, ddp_model_parameter in zip(non_parallel_model.parameters(), ddp_model.parameters()):
                 assert torch.allclose(non_parallel_model_parameter, ddp_model_parameter)
 
         # Shuffle the data so that during the next iteration, each DDP rank sees a different set of inputs.
@@ -175,8 +147,6 @@ def _test_DistributedDataParallelCPU(
     # After training is done, we should have the same weights on both the non-parallel baseline
     # and the model trained with DDP.
     if rank == 0:
-        for non_parallel_model_parameter, ddp_model_parameter in zip(
-            non_parallel_model.parameters(), ddp_model.parameters()
-        ):
+        for non_parallel_model_parameter, ddp_model_parameter in zip(non_parallel_model.parameters(), ddp_model.parameters()):
             assert torch.allclose(non_parallel_model_parameter, ddp_model_parameter)
     _cleanup_process_group()
